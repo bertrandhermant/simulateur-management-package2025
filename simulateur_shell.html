@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>Simulateur Management Package</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+<h1>Simulateur Management Package</h1>
+
+<!-- Tableau de saisie (lignes A18 → A93 injectées) -->
+<table id="tab">
+  <thead>
+    <tr>
+      <th>Catégorie (ordre Excel)</th>
+      <th>Nb titres</th>
+      <th>Valeur entrée (€)</th>
+      <th>Valeur cession (€)</th>
+      <th>PEA ?</th>
+      <th>Anc. BSPCE &gt; 3 ans</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<button id="calc">Simuler</button>
+<div id="results"></div>
+<button id="pdfBtn" style="display:none">Télécharger la synthèse PDF</button>
+
+<!-- jsPDF CDN (pour l'export PDF) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<!-- Tableau des libellés -->
+<script type="module" src="labels_A18_J93.js"></script>
+
+<!-- Moteur Excel converti (≈ 1 590 lignes) -->
+<script type="module" src="engine.generated.js"></script>
+
+<!-- Orchestrateur principal -->
+<script type="module">
+import labels from './labels_A18_J93.js';
+import { execEngine } from './engine.generated.js';
+
+const tbody = document.querySelector('#tab tbody');
+labels.forEach((lbl,i)=>{
+  const ln = 18+i;
+  tbody.insertAdjacentHTML('beforeend',`
+    <tr>
+      <td>${lbl}</td>
+      <td><input name="B${ln}" type="text" inputmode="decimal" pattern="[0-9]*"></td>
+      <td><input name="C${ln}" type="text" inputmode="decimal" pattern="[0-9]*"></td>
+      <td><input name="D${ln}" type="text" inputmode="decimal" pattern="[0-9]*"></td>
+      <td style="text-align:center">
+        ${/PEA/.test(lbl)?`<input name="E${ln}" type="checkbox" checked>`:`<input name="E${ln}" type="checkbox">`}
+      </td>
+      <td style="text-align:center">
+        ${/BSPCE/.test(lbl)?`<input name="F${ln}" type="checkbox" ${/> 3/.test(lbl)?'checked':''}>`:''}
+      </td>
+    </tr>`);
+});
+
+const fr=n=>n.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const readSheet=()=>{
+  const sh={};
+  tbody.querySelectorAll('input').forEach(inp=>{
+    if(!inp.name) return;
+    sh[inp.name]=inp.type==='checkbox'?inp.checked:parseFloat(inp.value.replace(',','.'))||0;
+  });
+  return sh;
+};
+const render=(cards,totImp,totNet)=>{
+  const c=document.getElementById('results'); c.innerHTML='';
+  cards.forEach(x=>c.insertAdjacentHTML('beforeend',`
+    <div class="card ${x.cls}">
+      <h3>${x.label}</h3>
+      <p>Impôts : ${fr(x.imp)} €</p>
+      <p>Gain net : ${fr(x.net)} €</p>
+    </div>`));
+  c.insertAdjacentHTML('beforeend',`
+    <div class="card total">
+      <h3>Total portefeuille</h3>
+      <p>Impôts totaux : ${fr(totImp)} €</p>
+      <p>Gain net global : ${fr(totNet)} €</p>
+    </div>`);
+  document.getElementById('pdfBtn').style.display='block';
+};
+
+document.getElementById('calc').onclick=()=>{
+  const s=readSheet();
+  execEngine(s);                 // exécute toutes les formules Excel
+  const cards=[
+    {label:'AO – hors PEA', imp:s.M260, net:s.N260, cls:'flat'},
+    {label:'AO – PEA',      imp:s.M261, net:s.N261, cls:'flat'},
+    {label:'ADP',           imp:s.M262, net:s.N262, cls:'flat'},
+    {label:'BSPCE ≤ 3 ans', imp:s.M263, net:s.N263, cls:'bsp'},
+    {label:'BSPCE > 3 ans', imp:s.M264, net:s.N264, cls:'bsp'},
+    {label:'AGAO',          imp:s.M265, net:s.N265, cls:'aga'},
+    {label:'AGADP',         imp:s.M266, net:s.N266, cls:'aga'}
+  ];
+  render(cards,s.M285,s.N285);
+};
+
+document.getElementById('pdfBtn').onclick=async()=>{
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF('p','pt','a4');
+  await pdf.html(document.getElementById('results'),{
+    margin:[20,20,20,20],
+    autoPaging:'text',
+    callback:doc=>doc.save('synthese_management_package.pdf')
+  });
+};
+</script>
+</body>
+</html>
